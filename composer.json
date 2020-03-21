@@ -1,6 +1,6 @@
 {
     "name": "octavianparalescu/laravel-api-controller-methods",
-    "description": "Laravel Controller methods that allow the developer to quickly build an API",
+    "description": "Laravel Controller methods that allow the developer to quickly build a Resource-based API",
     "keywords": [
         "laravel",
         "api",

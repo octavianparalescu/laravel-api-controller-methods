@@ -4,7 +4,7 @@
 namespace OctavianParalescu\ApiController\Controllers;
 
 
-use App\Http\Converters\Http\RequestConverter;
+use OctavianParalescu\ApiController\Converters\RequestConverter;
 
 trait ApiIndexTrait
 {
