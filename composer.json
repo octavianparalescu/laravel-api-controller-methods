@@ -1,0 +1,29 @@
+{
+    "name": "octavianparalescu/laravel-api-controller-methods",
+    "description": "Laravel Controller methods that allow the developer to quickly build an API",
+    "keywords": [
+        "laravel",
+        "api",
+        "controller",
+        "resource"
+    ],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Octavian Paralescu",
+            "email": "paralescuoctavian@gmail.com"
+        }
+    ],
+    "require": {
+        "php": ">=7",
+        "illuminate/support": ">=4.1.0",
+        "ext-json": "*",
+        "guzzlehttp/guzzle": "^6.2"
+    },
+    "autoload": {
+        "psr-0": {
+            "OctavianParalescu\\ApiController\\": "src/"
+        }
+    },
+    "minimum-stability": "dev"
+}

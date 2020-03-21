@@ -1,0 +1,26 @@
+<?php
+
+
+namespace OctavianParalescu\ApiController\Controllers;
+
+
+use App\Http\Converters\Http\RequestConverter;
+
+trait ApiIndexTrait
+{
+    public function apiIndex(RequestConverter $requestConverter, string $selectedModelClass)
+    {
+        $httpRequest = request();
+
+        // Convert the http request parameters to a model query
+        $query = $requestConverter->convert($selectedModelClass, $httpRequest);
+
+        // Paginate the results
+        $entities = $query->paginate($httpRequest->per_page);
+
+        // Add the existing query parameter to the current/next/previous page url
+        $entities->appends($httpRequest->query());
+
+        return $entities->toArray();
+    }
+}
