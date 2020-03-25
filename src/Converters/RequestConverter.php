@@ -110,7 +110,7 @@ class RequestConverter
 
             // Filter by selectable fields
             foreach ($selectedFields as $selectedModel => $fields) {
-                $selectedModelClass = $namespace . ucwords(strtolower($selectedModel));
+                $selectedModelClass = $namespace . '\\' . ucwords(strtolower($selectedModel));
                 if (class_exists($selectedModelClass)) {
                     $selectedFields[$selectedModel] = array_filter(
                         $fields,
