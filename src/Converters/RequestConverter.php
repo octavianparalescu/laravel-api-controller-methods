@@ -5,6 +5,9 @@ namespace OctavianParalescu\ApiController\Converters;
 
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
 class RequestConverter
@@ -18,13 +21,13 @@ class RequestConverter
      *
      * @return Builder
      */
-    public function convert(string $selectedModelClass, $httpRequest): Builder
+    public function convert(string $mainResourceModel, $httpRequest): Builder
     {
-        $sortableBy = constant($selectedModelClass . '::SORTABLE_BY');
-        $selectable = constant($selectedModelClass . '::CAN_SELECT');
+        $sortableBy = constant($mainResourceModel . '::SORTABLE_BY');
+        $selectable = constant($mainResourceModel . '::CAN_SELECT');
 
         /** @var Builder $query */
-        $query = call_user_func([$selectedModelClass, 'query']);
+        $query = call_user_func([$mainResourceModel, 'query']);
 
         $mainResourceName = Str::singular($query->getModel()->getTable());
 
@@ -32,10 +35,10 @@ class RequestConverter
         $this->applySorting($httpRequest, $sortableBy, $query);
 
         // Process query fields
-        $selectedFields = $this->processQueryFields($selectedModelClass, $httpRequest, $mainResourceName, $selectable);
+        $selectedFields = $this->processQueryFields($mainResourceModel, $httpRequest, $mainResourceName, $selectable);
 
         // Eager loading
-        $selectedFields = $this->eagerLoadRelatedResources($selectedFields, $mainResourceName, $query);
+        $selectedFields = $this->eagerLoadRelatedResources($selectedFields, $mainResourceName, $query, $mainResourceModel);
 
         // Selecting required fields (excepting the eager loaded relationships)
         $query->select($selectedFields[$mainResourceName]);
@@ -82,9 +85,8 @@ class RequestConverter
      *
      * @return array
      */
-    private function processQueryFields(string $selectedModelClass, $httpRequest, string $mainResourceName, $selectable): array
+    private function processQueryFields(string $mainResourceModel, $httpRequest, string $mainResourceName, $selectable): array
     {
-        $namespace = substr($selectedModelClass, 0, strrpos($selectedModelClass, '\\'));
         if (!empty($httpRequest->fields) && is_array($httpRequest->fields)) {
             $selectedFields = $httpRequest->fields;
 
@@ -110,7 +112,7 @@ class RequestConverter
 
             // Filter by selectable fields
             foreach ($selectedFields as $selectedModel => $fields) {
-                $selectedModelClass = $namespace . '\\' . ucwords(strtolower($selectedModel));
+                $selectedModelClass = $this->getModelClass($mainResourceModel, $selectedModel);
                 if (class_exists($selectedModelClass)) {
                     $selectedFields[$selectedModel] = array_filter(
                         $fields,
@@ -141,25 +143,57 @@ class RequestConverter
      *
      * @return array
      */
-    private function eagerLoadRelatedResources(array $selectedFields, string $mainResourceName, Builder $query): array
-    {
+    private function eagerLoadRelatedResources(
+        array $selectedFields,
+        string $mainResourceName,
+        Builder $query,
+        string $mainResourceModel
+    ): array {
         foreach ($selectedFields as $selectedResource => $selectedFieldList) {
             if ($selectedResource !== $mainResourceName) {
-                // The column designated as the id of the model that should be eager loaded
-                // should be selected in the main query
-                $selectedResourceRelationshipId = $selectedResource . '_id';
-                if (!in_array($selectedResourceRelationshipId, $selectedFields[$mainResourceName])) {
-                    $selectedFields[$mainResourceName] [] = $selectedResourceRelationshipId;
+                $mainResourceModelInstance = new $mainResourceModel();
+                if (method_exists($mainResourceModelInstance, $selectedResource)) {
+                    if (get_class($mainResourceModelInstance->$selectedResource()) === BelongsTo::class) {
+                        // The column designated as the id of the model that should be eager loaded
+                        // should be selected in the main query
+                        $selectedResourceRelationshipId = $selectedResource . '_id';
+                        if (!in_array($selectedResourceRelationshipId, $selectedFields[$mainResourceName])) {
+                            $selectedFields[$mainResourceName] [] = $selectedResourceRelationshipId;
+                        }
+                        // The id must be present in column list of eager loaded models
+                        if (!in_array('id', $selectedFieldList)) {
+                            $selectedFieldList [] = 'id';
+                        }
+                    } elseif (get_class($mainResourceModelInstance->$selectedResource()) === HasMany::class) {
+                        if (!in_array($mainResourceName . '_id', $selectedFieldList)) {
+                            $selectedFieldList [] = $mainResourceName . '_id';
+                        }
+                    } elseif (get_class($mainResourceModelInstance->$selectedResource()) === BelongsToMany::class) {
+                        $idPosition = array_search('id', $selectedFieldList);
+                        if ($idPosition !== false) {
+                            unset($selectedFieldList[$idPosition]);
+                            $selectedFieldList []= $selectedResource . '.id';
+                        }
+                    }
+                    $relations = $selectedResource . ':' . implode(',', $selectedFieldList);
+                    $query->with($relations);
                 }
-                // The id must be present in column list of eager loaded models
-                if (!in_array('id', $selectedFieldList)) {
-                    $selectedFieldList [] = 'id';
-                }
-                $relations = $selectedResource . ':' . implode(',', $selectedFieldList);
-                $query->with($relations);
             }
         }
 
         return $selectedFields;
+    }
+
+    /**
+     * @param string $mainResourceModel
+     * @param        $selectedModel
+     *
+     * @return string
+     */
+    private function getModelClass(string $mainResourceModel, $selectedModel): string
+    {
+        return substr($mainResourceModel, 0, strrpos($mainResourceModel, '\\')) . '\\' . ucwords(
+                Str::singular(strtolower($selectedModel))
+            );
     }
 }
