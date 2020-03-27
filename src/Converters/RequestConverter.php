@@ -8,20 +8,24 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 class RequestConverter
 {
+    const API_ACTION_INDEX = 'index';
+    const API_ACTION_SHOW = 'show';
+
     /**
      * Converts the HTTP Request parameters to a Model Query for the
      * index Unauthenticated controller
      *
-     * @param string $selectedModelClass
-     * @param        $httpRequest
+     * @param string  $selectedModelClass
+     * @param Request $httpRequest
      *
      * @return Builder
      */
-    public function convert(string $mainResourceModel, $httpRequest): Builder
+    public function convert(string $mainResourceModel, Request $httpRequest, string $apiAction, string $id = null): Builder
     {
         $sortableBy = constant($mainResourceModel . '::SORTABLE_BY');
         $selectable = constant($mainResourceModel . '::CAN_SELECT');
@@ -32,7 +36,9 @@ class RequestConverter
         $mainResourceName = Str::singular($query->getModel()->getTable());
 
         // Sorting
-        $this->applySorting($httpRequest, $sortableBy, $query);
+        if ($apiAction === self::API_ACTION_INDEX) {
+            $query = $this->applySorting($httpRequest, $sortableBy, $query);
+        }
 
         // Process query fields
         $selectedFields = $this->processQueryFields($mainResourceModel, $httpRequest, $mainResourceName, $selectable);
@@ -43,15 +49,22 @@ class RequestConverter
         // Selecting required fields (excepting the eager loaded relationships)
         $query->select($selectedFields[$mainResourceName]);
 
+        // Limiting to only one resource entity
+        if ($apiAction === self::API_ACTION_SHOW) {
+            $query->find($id);
+        }
+
         return $query;
     }
 
     /**
-     * @param         $httpRequest
-     * @param         $sortableBy
+     * @param Request $httpRequest
+     * @param array   $sortableBy
      * @param Builder $query
+     *
+     * @return Builder
      */
-    private function applySorting($httpRequest, $sortableBy, Builder $query): void
+    private function applySorting(Request $httpRequest, array $sortableBy, Builder $query): Builder
     {
         if (!empty($httpRequest->sort)) {
             $sortParameters = explode(',', $httpRequest->sort);
@@ -75,6 +88,8 @@ class RequestConverter
                 }
             }
         }
+
+        return $query;
     }
 
     /**
@@ -172,7 +187,7 @@ class RequestConverter
                         $idPosition = array_search('id', $selectedFieldList);
                         if ($idPosition !== false) {
                             unset($selectedFieldList[$idPosition]);
-                            $selectedFieldList []= $selectedResource . '.id';
+                            $selectedFieldList [] = $selectedResource . '.id';
                         }
                     }
                     $relations = $selectedResource . ':' . implode(',', $selectedFieldList);

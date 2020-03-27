@@ -13,7 +13,7 @@ trait ApiIndexTrait
         $httpRequest = request();
 
         // Convert the http request parameters to a model query
-        $query = $requestConverter->convert($selectedModelClass, $httpRequest);
+        $query = $requestConverter->convert($selectedModelClass, $httpRequest, RequestConverter::API_ACTION_INDEX);
 
         // Paginate the results
         $entities = $query->paginate($httpRequest->per_page);
