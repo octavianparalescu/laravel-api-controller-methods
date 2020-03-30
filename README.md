@@ -5,3 +5,4 @@ Laravel Controller methods that allow the developer to quickly build a Resource-
 - reformat code into RQ/APPLIER/RS
 - tag versions
 - tests
+- documentation

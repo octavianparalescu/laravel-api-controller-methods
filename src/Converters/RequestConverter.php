@@ -15,6 +15,7 @@ class RequestConverter
 {
     const API_ACTION_INDEX = 'index';
     const API_ACTION_SHOW = 'show';
+    const FILTER_PATTERN = '/([a-zA-Z_]+) ?([><=]|[>=]|[<=]|[<>]|[!=]|[<=>]|like|not like|null|not null)[\s]?(.*)?/i';
 
     /**
      * Converts the HTTP Request parameters to a Model Query for the
@@ -61,6 +62,15 @@ class RequestConverter
         if ($apiAction === self::API_ACTION_SHOW) {
             // Limiting to only one resource entity
             $query->find($id);
+        } else {
+            // Filter the main resource
+            $query = $this->applyFilters(
+                $httpRequest,
+                array_keys($selectedFields),
+                $mainResourceName,
+                $mainResourceModel,
+                $query
+            );
         }
 
         return $query;
@@ -152,7 +162,23 @@ class RequestConverter
             $selectedFields = [];
         }
 
-        // Default selected fields on the main resource are applied if there were no selected fields
+        if (!empty($httpRequest->filters) && is_array($httpRequest->filters)) {
+            foreach ($httpRequest->filters as $filteredResource => $filters) {
+                $filtersArray = is_array($filters) ? $filters : [$filters];
+                foreach ($filtersArray as $filter) {
+                    $isMatching = preg_match(self::FILTER_PATTERN, $filter, $matches);
+                    if ($isMatching) {
+                        if (!isset($selectedFields[$filteredResource])) {
+                            $selectedFields[$filteredResource] = [];
+                        }
+
+                        $selectedFields[$filteredResource][] = $matches[1];
+                    }
+                }
+            }
+        }
+
+            // Default selected fields on the main resource are applied if there were no selected fields
         if (!array_key_exists($mainResourceName, $selectedFields)) {
             $selectedFields[$mainResourceName] = $selectable;
         }
@@ -200,24 +226,22 @@ class RequestConverter
                             $selectedFieldList [] = $selectedResource . '.id';
                         }
                     }
-                    if (isset($httpRequest->limit[$selectedResource])) {
-                        $limit = intval($httpRequest->limit[$selectedResource]);
-                        $query->with(
-                            [
-                                $selectedResource => function ($query) use (
-                                    $selectedFieldList,
-                                    $limit
-                                ) {
-                                    return $query->select($selectedFieldList)
-                                                 ->limit($limit);
-                                },
-                            ]
-                        );
-                    } else {
-                        $relations = $selectedResource . ':' . implode(',', $selectedFieldList);
 
-                        $query->with($relations);
-                    }
+                    $limit = !empty($httpRequest->limit[$selectedResource]) ? intval($httpRequest->limit[$selectedResource])
+                        : null;
+                    $query->with(
+                        [
+                            $selectedResource => function ($query) use (
+                                $selectedFieldList,
+                                $limit
+                            ) {
+                                $query = $query->select($selectedFieldList)
+                                               ->limit($limit);
+
+                                return $query;
+                            },
+                        ]
+                    );
                 }
             }
         }
@@ -238,5 +262,68 @@ class RequestConverter
             );
 
         return $result;
+    }
+
+    /**
+     * @param Request $httpRequest
+     * @param string  $mainResourceName
+     * @param Builder $query
+     *
+     * @return mixed
+     */
+    private function applyFilters(
+        Request $httpRequest,
+        array $selectedResources,
+        string $mainResourceName,
+        string $mainResourceModel,
+        $query
+    ) {
+        if (!empty($httpRequest->filters)) {
+            foreach ($httpRequest->filters as $filteredResource => $filters) {
+                if (!in_array($filteredResource, $selectedResources)) {
+                    continue;
+                }
+                if (!is_array($filters)) {
+                    $filters = [$filters];
+                }
+                foreach ($filters as $filter) {
+                    $matches = null;
+                    $isAMatch = preg_match(self::FILTER_PATTERN, urldecode($filter), $matches);
+
+                    if ($isAMatch) {
+                        if ($mainResourceName === $filteredResource) {
+                            if (count($matches) === 4) {
+                                // eg. id=3
+                                $query = $query->where($matches[1], $matches[2], $matches[3]);
+                            } elseif (count($matches) === 3) {
+                                // eg. id not null
+                                $query = $query->where($matches[1], $matches[2]);
+                            }
+                        } else {
+                            $filteredResourceModel = $this->getModelClass($mainResourceModel, $filteredResource);
+                            $filteredResourceModelInstance = new $filteredResourceModel();
+                            $table = $filteredResourceModelInstance->getTable();
+
+                            $query = $query->whereHas(
+                                $filteredResource,
+                                function (Builder $query) use ($matches) {
+                                    if (count($matches) === 4) {
+                                        // eg. id=3
+                                        $query = $query->where($matches[1], $matches[2], $matches[3]);
+                                    } elseif (count($matches) === 3) {
+                                        // eg. id not null
+                                        $query = $query->where($matches[1], $matches[2]);
+                                    }
+
+                                    return $query;
+                                }
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        return $query;
     }
 }
