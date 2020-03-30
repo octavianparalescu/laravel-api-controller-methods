@@ -33,7 +33,10 @@ class RequestConverter
         /** @var Builder $query */
         $query = call_user_func([$mainResourceModel, 'query']);
 
-        $mainResourceName = Str::singular($query->getModel()->getTable());
+        $mainResourceName = Str::singular(
+            $query->getModel()
+                  ->getTable()
+        );
 
         // Sorting
         if ($apiAction === self::API_ACTION_INDEX) {
@@ -44,13 +47,19 @@ class RequestConverter
         $selectedFields = $this->processQueryFields($mainResourceModel, $httpRequest, $mainResourceName, $selectable);
 
         // Eager loading
-        $selectedFields = $this->eagerLoadRelatedResources($selectedFields, $mainResourceName, $query, $mainResourceModel);
+        $selectedFields = $this->eagerLoadRelatedResources(
+            $selectedFields,
+            $mainResourceName,
+            $query,
+            $mainResourceModel,
+            $httpRequest
+        );
 
         // Selecting required fields (excepting the eager loaded relationships)
         $query->select($selectedFields[$mainResourceName]);
 
-        // Limiting to only one resource entity
         if ($apiAction === self::API_ACTION_SHOW) {
+            // Limiting to only one resource entity
             $query->find($id);
         }
 
@@ -162,7 +171,8 @@ class RequestConverter
         array $selectedFields,
         string $mainResourceName,
         Builder $query,
-        string $mainResourceModel
+        string $mainResourceModel,
+        Request $httpRequest
     ): array {
         foreach ($selectedFields as $selectedResource => $selectedFieldList) {
             if ($selectedResource !== $mainResourceName) {
@@ -190,8 +200,24 @@ class RequestConverter
                             $selectedFieldList [] = $selectedResource . '.id';
                         }
                     }
-                    $relations = $selectedResource . ':' . implode(',', $selectedFieldList);
-                    $query->with($relations);
+                    if (isset($httpRequest->limit[$selectedResource])) {
+                        $limit = intval($httpRequest->limit[$selectedResource]);
+                        $query->with(
+                            [
+                                $selectedResource => function ($query) use (
+                                    $selectedFieldList,
+                                    $limit
+                                ) {
+                                    return $query->select($selectedFieldList)
+                                                 ->limit($limit);
+                                },
+                            ]
+                        );
+                    } else {
+                        $relations = $selectedResource . ':' . implode(',', $selectedFieldList);
+
+                        $query->with($relations);
+                    }
                 }
             }
         }
@@ -207,8 +233,10 @@ class RequestConverter
      */
     private function getModelClass(string $mainResourceModel, $selectedModel): string
     {
-        return substr($mainResourceModel, 0, strrpos($mainResourceModel, '\\')) . '\\' . ucwords(
+        $result = substr($mainResourceModel, 0, strrpos($mainResourceModel, '\\')) . '\\' . ucwords(
                 Str::singular(strtolower($selectedModel))
             );
+
+        return $result;
     }
 }
