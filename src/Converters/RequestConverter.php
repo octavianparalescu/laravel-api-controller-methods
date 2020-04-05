@@ -24,9 +24,9 @@ class RequestConverter
      * @param string  $selectedModelClass
      * @param Request $httpRequest
      *
-     * @return Builder
+     * @return array
      */
-    public function convert(string $mainResourceModel, Request $httpRequest, string $apiAction, string $id = null): Builder
+    public function convert(string $mainResourceModel, Request $httpRequest, string $apiAction, string $id = null): array
     {
         $sortableBy = constant($mainResourceModel . '::SORTABLE_BY');
         $selectable = constant($mainResourceModel . '::CAN_SELECT');
@@ -39,54 +39,122 @@ class RequestConverter
                   ->getTable()
         );
 
-        // Sorting
-        if ($apiAction === self::API_ACTION_INDEX) {
-            $query = $this->applySorting($httpRequest, $sortableBy, $query);
-        }
-
-        // Process query fields
-        $selectedFields = $this->processQueryFields($mainResourceModel, $httpRequest, $mainResourceName, $selectable);
-
-        // Eager loading
-        $selectedFields = $this->eagerLoadRelatedResources(
-            $selectedFields,
-            $mainResourceName,
-            $query,
+        $request = $this->extractQueryParametersFromHttpRequest(
             $mainResourceModel,
-            $httpRequest
+            $httpRequest,
+            $apiAction,
+            $sortableBy,
+            $mainResourceName,
+            $selectable
         );
 
-        // Selecting required fields (excepting the eager loaded relationships)
-        $query->select($selectedFields[$mainResourceName]);
+        $query = $this->applyApiRequestParametersToQuery(
+            $mainResourceModel,
+            $apiAction,
+            $request,
+            $mainResourceName,
+            $query,
+            $id
+        );
+
+        return ['request' => $request, 'query' => $query];
+    }
+
+    /**
+     * @param string  $mainResourceModel
+     * @param Request $httpRequest
+     * @param string  $apiAction
+     * @param         $sortableBy
+     * @param string  $mainResourceName
+     * @param         $selectable
+     *
+     * @return array
+     */
+    private function extractQueryParametersFromHttpRequest(
+        string $mainResourceModel,
+        Request $httpRequest,
+        string $apiAction,
+        $sortableBy,
+        string $mainResourceName,
+        $selectable
+    ): array {
+        $request = [];
+        $request['selected_fields'] = [];
+        $request['sorting'] = [];
+        $request['filters'] = [];
+        $request['limits'] = [];
+        $request['errors'] = [];
+
+        // Extracts sorting request
+        if ($apiAction === self::API_ACTION_INDEX) {
+            $request = $this->extractSortingParameters($httpRequest->query('sort'), $sortableBy, $request, $mainResourceName);
+        }
+
+        // Extracts query fields
+        $request = $this->extractSelectedFields(
+            $httpRequest->query('fields'),
+            $request,
+            $mainResourceModel,
+            $mainResourceName,
+            $selectable
+        );
+
+        // Extracts filters
+        $request['filters'] = $this->extractFilters($httpRequest->query('filters'));
+
+        $request = $this->extractSelectedFieldsFromFilters($request);
+        $request = $this->extractEagerLoadedResources($request, $mainResourceName, $mainResourceModel);
+
+        if ($apiAction === self::API_ACTION_INDEX) {
+            $request = $this->extractLimitParameters($httpRequest->query('limit'), $request);
+        }
+
+        return $request;
+    }
+
+    /**
+     * @param string  $mainResourceModel
+     * @param string  $apiAction
+     * @param array   $request
+     * @param string  $mainResourceName
+     * @param Builder $query
+     * @param string  $id
+     *
+     * @return Builder
+     */
+    private function applyApiRequestParametersToQuery(
+        string $mainResourceModel,
+        string $apiAction,
+        array $request,
+        string $mainResourceName,
+        Builder $query,
+        string $id = null
+    ): Builder {
+        $query = $this->selectEagerLoadedResources($request['selected_fields'], $request['limits'], $mainResourceName, $query);
+        $query = $this->selectMainResource($query, $request, $mainResourceName);
 
         if ($apiAction === self::API_ACTION_SHOW) {
-            // Limiting to only one resource entity
-            $query->find($id);
-        } else {
-            // Filter the main resource
-            $query = $this->applyFilters(
-                $httpRequest,
-                array_keys($selectedFields),
-                $mainResourceName,
-                $mainResourceModel,
-                $query
-            );
+            $query = $this->applyShowSingleResource($id, $query);
+        } elseif ($apiAction === self::API_ACTION_INDEX) {
+            $query = $this->applySortingMainResource($request['sorting'], $query);
+            $query = $this->applyFiltersAllResource($request['filters'], $mainResourceName, $mainResourceModel, $query);
         }
 
         return $query;
     }
 
     /**
-     * @param Request $httpRequest
-     * @param array   $sortableBy
-     * @param Builder $query
+     * @param mixed   $sort
+     * @param         $sortableBy
+     * @param array   $request
+     * @param string  $mainResourceName
      *
-     * @return Builder
+     * @return array
      */
-    private function applySorting(Request $httpRequest, array $sortableBy, Builder $query): Builder
+    private function extractSortingParameters($sort, $sortableBy, array $request, string $mainResourceName): array
     {
-        if (!empty($httpRequest->sort)) {
-            $sortParameters = explode(',', $httpRequest->sort);
+        if (!empty($sort)) {
+            $sortParameters = explode(',', $sort);
             foreach ($sortParameters as $sortParameter) {
                 $orderTypeFlag = substr($sortParameter, 0, 1);
                 switch ($orderTypeFlag) {
@@ -103,27 +171,53 @@ class RequestConverter
                         $sortingBy = $sortParameter;
                 }
                 if (in_array($sortingBy, $sortableBy)) {
-                    $query->orderBy($sortingBy, $sortType);
+                    $request['sorting'][] = ['sort_by' => $sortingBy, 'sort_type' => $sortType];
+                } else {
+                    $request['errors'][] = 'Sorting by ' . $sortingBy . ' is not allowed for ' . $mainResourceName;
                 }
             }
         }
 
-        return $query;
+        return $request;
     }
 
     /**
-     * @param string $selectedModelClass
-     * @param        $httpRequest
-     * @param string $mainResourceName
-     * @param        $selectable
+     * @param mixed $limit
+     * @param array $request
      *
      * @return array
      */
-    private function processQueryFields(string $mainResourceModel, $httpRequest, string $mainResourceName, $selectable): array
+    private function extractLimitParameters($limit, array $request): array
     {
-        if (!empty($httpRequest->fields) && is_array($httpRequest->fields)) {
-            $selectedFields = $httpRequest->fields;
+        if (!empty($limit) && is_array($limit)) {
+            foreach ($limit as $selectedResource => $limit) {
+                if (array_key_exists($selectedResource, $request['selected_fields'])) {
+                    $request['limits'][$selectedResource] = intval($limit);
+                } else {
+                    $request['errors'][] = 'Cannot limit by unselected resource ' . $selectedResource;
+                }
+            }
+        }
 
+        return $request;
+    }
+
+    /**
+     * @param array|null $selectedFields
+     * @param string     $selectedModelClass
+     * @param string     $mainResourceName
+     * @param            $selectable
+     *
+     * @return array
+     */
+    private function extractSelectedFields(
+        ?array $selectedFields,
+        array $request,
+        string $mainResourceModel,
+        string $mainResourceName,
+        $selectable
+    ): array {
+        if (!empty($selectedFields) && is_array($selectedFields)) {
             // Remove non-comma delimited arrays from the fields
             $selectedFields = array_filter(
                 $selectedFields,
@@ -150,11 +244,18 @@ class RequestConverter
                 if (class_exists($selectedModelClass)) {
                     $selectedFields[$selectedModel] = array_filter(
                         $fields,
-                        function ($item) use ($selectedModelClass) {
-                            return in_array($item, constant($selectedModelClass . '::CAN_SELECT'));
+                        function ($item) use ($selectedModelClass, $selectedModel, &$request) {
+                            $isInArray = in_array($item, constant($selectedModelClass . '::CAN_SELECT'));
+
+                            if (!$isInArray) {
+                                $request['errors'][] = 'There is no field ' . $item . ' on resource ' . $selectedModel;
+                            }
+
+                            return $isInArray;
                         }
                     );
                 } else {
+                    $request['errors'][] = 'There is no resource ' . $selectedModel;
                     unset($selectedFields[$selectedModel]);
                 }
             }
@@ -162,44 +263,88 @@ class RequestConverter
             $selectedFields = [];
         }
 
-        if (!empty($httpRequest->filters) && is_array($httpRequest->filters)) {
-            foreach ($httpRequest->filters as $filteredResource => $filters) {
-                $filtersArray = is_array($filters) ? $filters : [$filters];
-                foreach ($filtersArray as $filter) {
-                    $isMatching = preg_match(self::FILTER_PATTERN, $filter, $matches);
-                    if ($isMatching) {
-                        if (!isset($selectedFields[$filteredResource])) {
-                            $selectedFields[$filteredResource] = [];
-                        }
+        // Default selected fields on the main resource are applied if there were no selected fields
+        if (!array_key_exists($mainResourceName, $selectedFields)) {
+            $selectedFields[$mainResourceName] = $selectable;
+        }
 
-                        $selectedFields[$filteredResource][] = $matches[1];
+        $request['selected_fields'] = $selectedFields;
+
+        return $request;
+    }
+
+    /**
+     * @param array|null $httpRequest
+     * @param string     $mainResourceName
+     * @param Builder    $query
+     *
+     * @return mixed
+     */
+    private function extractFilters(
+        ?array $requestFilters
+    ) {
+        $extractedFilters = [];
+        if (!empty($requestFilters)) {
+            foreach ($requestFilters as $filteredResource => $filters) {
+                if (!is_array($filters)) {
+                    $filters = [$filters];
+                }
+                foreach ($filters as $filter) {
+                    $matches = null;
+                    $isAMatch = preg_match(self::FILTER_PATTERN, urldecode($filter), $matches);
+
+                    if ($isAMatch) {
+                        if (!isset($extractedFilters[$filteredResource])) {
+                            $extractedFilters[$filteredResource] = [];
+                        }
+                        if (count($matches) === 4) {
+                            // eg. [id][=][3]
+                            $extractedFilters[$filteredResource][] = [$matches[1], $matches[2], $matches[3]];
+                        } elseif (count($matches) === 3) {
+                            // eg. [id] [not null]
+                            $extractedFilters[$filteredResource][] = [$matches[1], $matches[2]];
+                        }
                     }
                 }
             }
         }
 
-            // Default selected fields on the main resource are applied if there were no selected fields
-        if (!array_key_exists($mainResourceName, $selectedFields)) {
-            $selectedFields[$mainResourceName] = $selectable;
+        return $extractedFilters;
+    }
+
+    private function extractSelectedFieldsFromFilters(array $request): array
+    {
+        $filters = $request['filters'];
+        $selectedFields = $request['selected_fields'];
+        foreach ($filters as $filteredResource => $filters) {
+            if (!isset($selectedFields[$filteredResource])) {
+                $selectedFields[$filteredResource] = [];
+            }
+            foreach ($filters as $filter) {
+                if (array_search($filter[0], $selectedFields[$filteredResource]) === false) {
+                    $selectedFields[$filteredResource] [] = $filter[0];
+                }
+            }
         }
 
-        return $selectedFields;
+        $request['selected_fields'] = $selectedFields;
+
+        return $request;
     }
 
     /**
-     * @param array   $selectedFields
+     * @param array   $request
      * @param string  $mainResourceName
      * @param Builder $query
      *
      * @return array
      */
-    private function eagerLoadRelatedResources(
-        array $selectedFields,
+    private function extractEagerLoadedResources(
+        array $request,
         string $mainResourceName,
-        Builder $query,
-        string $mainResourceModel,
-        Request $httpRequest
+        string $mainResourceModel
     ): array {
+        $selectedFields = $request['selected_fields'];
         foreach ($selectedFields as $selectedResource => $selectedFieldList) {
             if ($selectedResource !== $mainResourceName) {
                 $mainResourceModelInstance = new $mainResourceModel();
@@ -213,40 +358,170 @@ class RequestConverter
                         }
                         // The id must be present in column list of eager loaded models
                         if (!in_array('id', $selectedFieldList)) {
-                            $selectedFieldList [] = 'id';
+                            $selectedFields[$selectedResource] [] = 'id';
                         }
                     } elseif (get_class($mainResourceModelInstance->$selectedResource()) === HasMany::class) {
                         if (!in_array($mainResourceName . '_id', $selectedFieldList)) {
-                            $selectedFieldList [] = $mainResourceName . '_id';
+                            $selectedFields[$selectedResource] [] = $mainResourceName . '_id';
                         }
                     } elseif (get_class($mainResourceModelInstance->$selectedResource()) === BelongsToMany::class) {
                         $idPosition = array_search('id', $selectedFieldList);
                         if ($idPosition !== false) {
-                            unset($selectedFieldList[$idPosition]);
-                            $selectedFieldList [] = $selectedResource . '.id';
+                            // We need to specify the resource of the id field or it will be ambigous
+                            unset($selectedFields[$selectedResource][$idPosition]);
+                            $selectedFields[$selectedResource] [] = $selectedResource . '.id';
+
+                            // Reset array keys after removing the id element
+                            $selectedFields[$selectedResource] = array_values($selectedFields[$selectedResource]);
+                        }
+
+                        // We must select the id of the main resource
+                        if (array_search('id', $selectedFields[$mainResourceName]) === false) {
+                            $selectedFields[$mainResourceName][] = 'id';
                         }
                     }
+                } else {
+                    $request['errors'][] = 'There is no relationship between this resource, ' . $mainResourceName . ', and resource ' . $selectedResource;
+                    unset($selectedFields[$selectedResource]);
+                }
+            }
+        }
 
-                    $limit = !empty($httpRequest->limit[$selectedResource]) ? intval($httpRequest->limit[$selectedResource])
-                        : null;
-                    $query->with(
-                        [
-                            $selectedResource => function ($query) use (
-                                $selectedFieldList,
-                                $limit
-                            ) {
-                                $query = $query->select($selectedFieldList)
-                                               ->limit($limit);
+        $request['selected_fields'] = $selectedFields;
 
-                                return $query;
-                            },
-                        ]
+        return $request;
+    }
+
+    /**
+     * @param Request $httpRequest
+     * @param array   $selectedFields
+     * @param string  $mainResourceName
+     * @param Builder $query
+     *
+     * @return Builder
+     */
+    private function selectEagerLoadedResources(
+        array $selectedFields,
+        array $limits,
+        string $mainResourceName,
+        Builder $query
+    ): Builder {
+        foreach ($selectedFields as $selectedResource => $selectedFieldList) {
+            if ($selectedResource !== $mainResourceName) {
+                $limit = null;
+                if (isset($limits[$selectedResource])) {
+                    $limit = $limits[$selectedResource];
+                }
+                $query->with(
+                    [
+                        $selectedResource => function ($query) use (
+                            $selectedFieldList,
+                            $limit
+                        ) {
+                            $query = $query->select($selectedFieldList)
+                                           ->limit($limit);
+
+                            return $query;
+                        },
+                    ]
+                );
+            }
+        }
+
+        return $query;
+    }
+
+    /**
+     * @param Builder $query
+     * @param array   $request
+     * @param string  $mainResourceName
+     *
+     * @return Builder
+     */
+    private function selectMainResource(Builder $query, array $request, string $mainResourceName): Builder
+    {
+        // Selecting required fields (excepting the eager loaded relationships)
+        $query = $query->select($request['selected_fields'][$mainResourceName]);
+
+        return $query;
+    }
+
+    /**
+     * @param string  $id
+     * @param Builder $query
+     *
+     * @return Builder
+     */
+    private function applyShowSingleResource(string $id, Builder $query): Builder
+    {
+        // Limiting to only one resource entity
+        $query->find($id);
+
+        return $query;
+    }
+
+    /**
+     * @param array   $sortItems
+     * @param Builder $query
+     *
+     * @return Builder
+     */
+    private function applySortingMainResource(array $sortItems, Builder $query): Builder
+    {
+        foreach ($sortItems as $sortItem) {
+            $query->orderBy($sortItem['sort_by'], $sortItem['sort_type']);
+        }
+
+        return $query;
+    }
+
+    /**
+     * @param Request $httpRequest
+     * @param string  $mainResourceName
+     * @param Builder $query
+     *
+     * @return Builder
+     */
+    private function applyFiltersAllResource(
+        array $filters,
+        string $mainResourceName,
+        string $mainResourceModel,
+        $query
+    ): Builder {
+        foreach ($filters as $filteredResource => $filters) {
+            foreach ($filters as $filter) {
+                if ($mainResourceName === $filteredResource) {
+                    if (count($filter) === 3) {
+                        // eg. id=3
+                        $query = $query->where($filter[0], $filter[1], $filter[2]);
+                    } elseif (count($filter) === 2) {
+                        // eg. id not null
+                        $query = $query->where($filter[0], $filter[1]);
+                    }
+                } else {
+                    $filteredResourceModel = $this->getModelClass($mainResourceModel, $filteredResource);
+                    $filteredResourceModelInstance = new $filteredResourceModel();
+                    $table = $filteredResourceModelInstance->getTable();
+
+                    $query = $query->whereHas(
+                        $filteredResource,
+                        function (Builder $query) use ($filter) {
+                            if (count($filter) === 3) {
+                                // eg. id=3
+                                $query = $query->where($filter[0], $filter[1], $filter[2]);
+                            } elseif (count($filter) === 2) {
+                                // eg. id not null
+                                $query = $query->where($filter[0], $filter[1]);
+                            }
+
+                            return $query;
+                        }
                     );
                 }
             }
         }
 
-        return $selectedFields;
+        return $query;
     }
 
     /**
@@ -262,68 +537,5 @@ class RequestConverter
             );
 
         return $result;
-    }
-
-    /**
-     * @param Request $httpRequest
-     * @param string  $mainResourceName
-     * @param Builder $query
-     *
-     * @return mixed
-     */
-    private function applyFilters(
-        Request $httpRequest,
-        array $selectedResources,
-        string $mainResourceName,
-        string $mainResourceModel,
-        $query
-    ) {
-        if (!empty($httpRequest->filters)) {
-            foreach ($httpRequest->filters as $filteredResource => $filters) {
-                if (!in_array($filteredResource, $selectedResources)) {
-                    continue;
-                }
-                if (!is_array($filters)) {
-                    $filters = [$filters];
-                }
-                foreach ($filters as $filter) {
-                    $matches = null;
-                    $isAMatch = preg_match(self::FILTER_PATTERN, urldecode($filter), $matches);
-
-                    if ($isAMatch) {
-                        if ($mainResourceName === $filteredResource) {
-                            if (count($matches) === 4) {
-                                // eg. id=3
-                                $query = $query->where($matches[1], $matches[2], $matches[3]);
-                            } elseif (count($matches) === 3) {
-                                // eg. id not null
-                                $query = $query->where($matches[1], $matches[2]);
-                            }
-                        } else {
-                            $filteredResourceModel = $this->getModelClass($mainResourceModel, $filteredResource);
-                            $filteredResourceModelInstance = new $filteredResourceModel();
-                            $table = $filteredResourceModelInstance->getTable();
-
-                            $query = $query->whereHas(
-                                $filteredResource,
-                                function (Builder $query) use ($matches) {
-                                    if (count($matches) === 4) {
-                                        // eg. id=3
-                                        $query = $query->where($matches[1], $matches[2], $matches[3]);
-                                    } elseif (count($matches) === 3) {
-                                        // eg. id not null
-                                        $query = $query->where($matches[1], $matches[2]);
-                                    }
-
-                                    return $query;
-                                }
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
-        return $query;
     }
 }
