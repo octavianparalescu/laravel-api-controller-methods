@@ -13,7 +13,10 @@ trait ApiIndexTrait
         $httpRequest = request();
 
         // Convert the http request parameters to a model query
-        $query = $requestConverter->convert($selectedModelClass, $httpRequest, RequestConverter::API_ACTION_INDEX);
+        $conversionResult = $requestConverter->convert($selectedModelClass, $httpRequest, RequestConverter::API_ACTION_INDEX);
+        
+        $request = $conversionResult['request'];
+        $query = $conversionResult['query'];
 
         // Paginate the results
         $entities = $query->paginate($httpRequest->per_page);
@@ -21,6 +24,6 @@ trait ApiIndexTrait
         // Add the existing query parameter to the current/next/previous page url
         $entities->appends($httpRequest->query());
 
-        return $entities->toArray();
+        return array_merge($entities->toArray(), ['request' => $request]);
     }
 }

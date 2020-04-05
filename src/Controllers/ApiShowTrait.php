@@ -21,9 +21,9 @@ trait ApiShowTrait
         $resultArray = $query->get()->toArray();
 
         if (isset($resultArray[0])) {
-            return array_merge($resultArray[0], ['request' => $request]);
+            return array_merge(['object' => $resultArray[0]], ['request' => $request]);
         } else {
-            return null;
+            return ['object' => null, 'request' => $request];
         }
     }
 }

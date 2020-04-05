@@ -87,9 +87,7 @@ class RequestConverter
         $request['errors'] = [];
 
         // Extracts sorting request
-        if ($apiAction === self::API_ACTION_INDEX) {
-            $request = $this->extractSortingParameters($httpRequest->query('sort'), $sortableBy, $request, $mainResourceName);
-        }
+        $request = $this->extractSortingParameters($httpRequest->query('sorting'), $sortableBy, $request, $mainResourceName);
 
         // Extracts query fields
         $request = $this->extractSelectedFields(
@@ -135,7 +133,7 @@ class RequestConverter
         $query = $this->selectMainResource($query, $request, $mainResourceName);
 
         if ($apiAction === self::API_ACTION_SHOW) {
-            $query = $this->applyShowSingleResource($id, $query);
+            $query = $this->applyShowSingleResource($id, $mainResourceModel, $query);
         } elseif ($apiAction === self::API_ACTION_INDEX) {
             $query = $this->applySortingMainResource($request['sorting'], $query);
             $query = $this->applyFiltersAllResource($request['filters'], $mainResourceName, $mainResourceModel, $query);
@@ -154,7 +152,7 @@ class RequestConverter
      */
     private function extractSortingParameters($sort, $sortableBy, array $request, string $mainResourceName): array
     {
-        if (!empty($sort)) {
+        if (!empty($sort) && is_string($sort)) {
             $sortParameters = explode(',', $sort);
             foreach ($sortParameters as $sortParameter) {
                 $orderTypeFlag = substr($sortParameter, 0, 1);
@@ -457,10 +455,21 @@ class RequestConverter
      *
      * @return Builder
      */
-    private function applyShowSingleResource(string $id, Builder $query): Builder
+    private function applyShowSingleResource(string $id, string $mainResourceModel, Builder $query): Builder
     {
-        // Limiting to only one resource entity
-        $query->find($id);
+        // Check if the main model allows single model retrieval by other means than the id
+        if (defined($mainResourceModel . '::OTHER_SINGLE_IDENTIFIER')) {
+            $otherIdentifier = constant($mainResourceModel . '::OTHER_SINGLE_IDENTIFIER');
+            $query->where(
+                function ($query) use ($id, $otherIdentifier) {
+                    $query->where('id', '=', $id)
+                          ->orWhere($otherIdentifier, '=', $id);
+                }
+            );
+        } else {
+            // Limiting to only one resource entity
+            $query->find($id);
+        }
 
         return $query;
     }
@@ -537,9 +546,13 @@ class RequestConverter
      */
     private function getModelClass(string $mainResourceModel, $selectedModel): string
     {
-        $result = substr($mainResourceModel, 0, strrpos($mainResourceModel, '\\')) . '\\' . ucwords(
-                Str::singular(strtolower($selectedModel))
-            );
+        $selectedModel = strtolower($selectedModel);
+        $selectedModelParts = explode('_', $selectedModel);
+        $selectedModelParts = array_map([Str::class, 'singular'], $selectedModelParts);
+        $selectedModelParts = array_map('ucwords', $selectedModelParts);
+        $selectedModel = implode('', $selectedModelParts);
+
+        $result = substr($mainResourceModel, 0, strrpos($mainResourceModel, '\\')) . '\\' . $selectedModel;
 
         return $result;
     }
