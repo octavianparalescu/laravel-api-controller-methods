@@ -13,12 +13,15 @@ trait ApiShowTrait
         $httpRequest = request();
 
         // Convert the http request parameters to a model query
-        $query = $requestConverter->convert($selectedModelClass, $httpRequest, RequestConverter::API_ACTION_SHOW, $id);
+        $conversionResult = $requestConverter->convert($selectedModelClass, $httpRequest, RequestConverter::API_ACTION_SHOW, $id);
+
+        $request = $conversionResult['request'];
+        $query = $conversionResult['query'];
 
         $resultArray = $query->get()->toArray();
 
         if (isset($resultArray[0])) {
-            return $resultArray[0];
+            return array_merge($resultArray[0], ['request' => $request]);
         } else {
             return null;
         }
