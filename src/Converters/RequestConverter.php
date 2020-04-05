@@ -16,6 +16,7 @@ class RequestConverter
     const API_ACTION_INDEX = 'index';
     const API_ACTION_SHOW = 'show';
     const FILTER_PATTERN = '/([a-zA-Z_]+) ?([><=]|[>=]|[<=]|[<>]|[!=]|[<=>]|like|not like|null|not null)[\s]?(.*)?/i';
+    const ALL_FIELDS_SELECTOR = '*';
 
     /**
      * Converts the HTTP Request parameters to a Model Query for the
@@ -242,18 +243,22 @@ class RequestConverter
             foreach ($selectedFields as $selectedModel => $fields) {
                 $selectedModelClass = $this->getModelClass($mainResourceModel, $selectedModel);
                 if (class_exists($selectedModelClass)) {
-                    $selectedFields[$selectedModel] = array_filter(
-                        $fields,
-                        function ($item) use ($selectedModelClass, $selectedModel, &$request) {
-                            $isInArray = in_array($item, constant($selectedModelClass . '::CAN_SELECT'));
+                    if (in_array(self::ALL_FIELDS_SELECTOR, $fields)) {
+                        $selectedFields[$selectedModel] = constant($selectedModelClass . '::CAN_SELECT');
+                    } else {
+                        $selectedFields[$selectedModel] = array_filter(
+                            $fields,
+                            function ($item) use ($selectedModelClass, $selectedModel, &$request) {
+                                $isInArray = in_array($item, constant($selectedModelClass . '::CAN_SELECT'));
 
-                            if (!$isInArray) {
-                                $request['errors'][] = 'There is no field ' . $item . ' on resource ' . $selectedModel;
+                                if (!$isInArray) {
+                                    $request['errors'][] = 'There is no field ' . $item . ' on resource ' . $selectedModel;
+                                }
+
+                                return $isInArray;
                             }
-
-                            return $isInArray;
-                        }
-                    );
+                        );
+                    }
                 } else {
                     $request['errors'][] = 'There is no resource ' . $selectedModel;
                     unset($selectedFields[$selectedModel]);
