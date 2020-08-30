@@ -21,7 +21,7 @@
         "guzzlehttp/guzzle": "^6.2"
     },
     "autoload": {
-        "psr-0": {
+        "psr-4": {
             "OctavianParalescu\\ApiController\\": "src/"
         }
     },
