@@ -112,12 +112,12 @@ class RequestConverter
     }
 
     /**
-     * @param string  $mainResourceModel
-     * @param string  $apiAction
-     * @param array   $request
-     * @param string  $mainResourceName
-     * @param Builder $query
-     * @param string  $id
+     * @param string      $mainResourceModel
+     * @param string      $apiAction
+     * @param array       $request
+     * @param string      $mainResourceName
+     * @param Builder     $query
+     * @param string|null $id
      *
      * @return Builder
      */
@@ -203,7 +203,8 @@ class RequestConverter
 
     /**
      * @param array|null $selectedFields
-     * @param string     $selectedModelClass
+     * @param array      $request
+     * @param string     $mainResourceModel
      * @param string     $mainResourceName
      * @param            $selectable
      *
@@ -277,15 +278,13 @@ class RequestConverter
     }
 
     /**
-     * @param array|null $httpRequest
-     * @param string     $mainResourceName
-     * @param Builder    $query
+     * @param array|null $requestFilters
      *
-     * @return mixed
+     * @return array
      */
     private function extractFilters(
         ?array $requestFilters
-    ) {
+    ): array {
         $extractedFilters = [];
         if (!empty($requestFilters)) {
             foreach ($requestFilters as $filteredResource => $filters) {
@@ -336,9 +335,9 @@ class RequestConverter
     }
 
     /**
-     * @param array   $request
-     * @param string  $mainResourceName
-     * @param Builder $query
+     * @param array  $request
+     * @param string $mainResourceName
+     * @param string $mainResourceModel
      *
      * @return array
      */
@@ -396,8 +395,8 @@ class RequestConverter
     }
 
     /**
-     * @param Request $httpRequest
      * @param array   $selectedFields
+     * @param array   $limits
      * @param string  $mainResourceName
      * @param Builder $query
      *
@@ -451,6 +450,7 @@ class RequestConverter
 
     /**
      * @param string  $id
+     * @param string  $mainResourceModel
      * @param Builder $query
      *
      * @return Builder
@@ -490,8 +490,9 @@ class RequestConverter
     }
 
     /**
-     * @param Request $httpRequest
+     * @param array   $filters
      * @param string  $mainResourceName
+     * @param string  $mainResourceModel
      * @param Builder $query
      *
      * @return Builder
@@ -500,7 +501,7 @@ class RequestConverter
         array $filters,
         string $mainResourceName,
         string $mainResourceModel,
-        $query
+        Builder $query
     ): Builder {
         foreach ($filters as $filteredResource => $filters) {
             foreach ($filters as $filter) {
@@ -552,8 +553,6 @@ class RequestConverter
         $selectedModelParts = array_map('ucwords', $selectedModelParts);
         $selectedModel = implode('', $selectedModelParts);
 
-        $result = substr($mainResourceModel, 0, strrpos($mainResourceModel, '\\')) . '\\' . $selectedModel;
-
-        return $result;
+        return substr($mainResourceModel, 0, strrpos($mainResourceModel, '\\')) . '\\' . $selectedModel;
     }
 }
