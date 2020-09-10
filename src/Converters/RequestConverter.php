@@ -22,15 +22,19 @@ class RequestConverter
      * Converts the HTTP Request parameters to a Model Query for the
      * index Unauthenticated controller
      *
-     * @param string  $selectedModelClass
-     * @param Request $httpRequest
+     * @param string      $mainResourceModel
+     * @param Request     $httpRequest
+     * @param string      $apiAction
+     * @param string|null $id
      *
      * @return array
      */
     public function convert(string $mainResourceModel, Request $httpRequest, string $apiAction, string $id = null): array
     {
-        $sortableBy = constant($mainResourceModel . '::SORTABLE_BY');
-        $selectable = constant($mainResourceModel . '::CAN_SELECT');
+        $sortableByConstantName = $mainResourceModel . '::SORTABLE_BY';
+        $sortableBy = defined($sortableByConstantName) ? constant($sortableByConstantName) : [];
+        $selectableConstantName = $mainResourceModel . '::CAN_SELECT';
+        $selectable = defined($selectableConstantName) ? constant($selectableConstantName) : [];
 
         /** @var Builder $query */
         $query = call_user_func([$mainResourceModel, 'query']);
