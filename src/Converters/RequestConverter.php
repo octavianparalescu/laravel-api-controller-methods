@@ -110,9 +110,7 @@ class RequestConverter
         $request = $this->extractSelectedFieldsFromFilters($request);
         $request = $this->extractEagerLoadedResources($request, $mainResourceName, $mainResourceModel);
 
-        if ($apiAction === self::API_ACTION_INDEX) {
-            $request = $this->extractLimitParameters($httpRequest->query('limit'), $request);
-        }
+        $request = $this->extractLimitParameters($httpRequest->query('limit'), $request);
 
         return $request;
     }
