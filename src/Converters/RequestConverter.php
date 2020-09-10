@@ -17,6 +17,8 @@ class RequestConverter
     const API_ACTION_SHOW = 'show';
     const FILTER_PATTERN = '/([a-zA-Z_]+) ?([><=]|[>=]|[<=]|[<>]|[!=]|[<=>]|like|not like|null|not null)[\s]?(.*)?/i';
     const ALL_FIELDS_SELECTOR = '*';
+    const CAN_SELECT = 'CAN_SELECT';
+    const SORTABLE_BY = 'SORTABLE_BY';
 
     /**
      * Converts the HTTP Request parameters to a Model Query for the
@@ -31,10 +33,10 @@ class RequestConverter
      */
     public function convert(string $mainResourceModel, Request $httpRequest, string $apiAction, string $id = null): array
     {
-        $sortableByConstantName = $mainResourceModel . '::SORTABLE_BY';
+        $sortableByConstantName = $mainResourceModel . '::' . self::SORTABLE_BY . '';
         $sortableBy = defined($sortableByConstantName) ? constant($sortableByConstantName) : [];
-        $selectableConstantName = $mainResourceModel . '::CAN_SELECT';
-        $selectable = defined($selectableConstantName) ? constant($selectableConstantName) : [self::ALL_FIELDS_SELECTOR];
+        $selectableConstantName = $mainResourceModel . '::' . self::CAN_SELECT . '';
+        $selectable = $this->getSelectableFieldsOrGetAll($selectableConstantName);
 
         /** @var Builder $query */
         $query = call_user_func([$mainResourceModel, 'query']);
@@ -247,12 +249,17 @@ class RequestConverter
                 $selectedModelClass = $this->getModelClass($mainResourceModel, $selectedModel);
                 if (class_exists($selectedModelClass)) {
                     if (in_array(self::ALL_FIELDS_SELECTOR, $fields)) {
-                        $selectedFields[$selectedModel] = constant($selectedModelClass . '::CAN_SELECT');
+                        $selectedFields[$selectedModel] = $this->getSelectableFieldsOrGetAll(
+                            $selectedModelClass . '::CAN_SELECT'
+                        );
                     } else {
                         $selectedFields[$selectedModel] = array_filter(
                             $fields,
                             function ($item) use ($selectedModelClass, $selectedModel, &$request) {
-                                $isInArray = in_array($item, constant($selectedModelClass . '::CAN_SELECT'));
+                                $isInArray = in_array(
+                                    $item,
+                                    $this->getSelectableFieldsOrGetAll($selectedModelClass . '::CAN_SELECT')
+                                );
 
                                 if (!$isInArray) {
                                     $request['errors'][] = 'There is no field ' . $item . ' on resource ' . $selectedModel;
@@ -558,5 +565,15 @@ class RequestConverter
         $selectedModel = implode('', $selectedModelParts);
 
         return substr($mainResourceModel, 0, strrpos($mainResourceModel, '\\')) . '\\' . $selectedModel;
+    }
+
+    /**
+     * @param string $selectableConstantName
+     *
+     * @return mixed|string[]
+     */
+    private function getSelectableFieldsOrGetAll(string $selectableConstantName)
+    {
+        return defined($selectableConstantName) ? constant($selectableConstantName) : [self::ALL_FIELDS_SELECTOR];
     }
 }

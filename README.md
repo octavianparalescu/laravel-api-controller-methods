@@ -123,6 +123,17 @@ class CitySection extends Pivot
 }
 ```
 
+Sample usage:
+```html
+http://localhost/item/1?select[city_section]=id
+http://localhost/city_section/2?fields[city]=name&fields[section]=name&fields[items]=city_section_id,name
+http://localhost/city/25291?fields[county]=name&fields[sections]=id,name,description
+http://localhost/city?fields[sections]=id,name&per_page=3186
+http://localhost/city?fields[sections]=id,name&per_page=3186&filters[county][]=name%20=%20Bac%C4%83u&filters[county][]=id=47
+http://localhost/city?fields[sections]=id,name&per_page=3186&filters[county]=name%20=%20Bac%C4%83u
+http://localhost/city?fields[city]=name,plm&fields[items]=id&fields[kkt]=2&fields[county]=name&fields[sections]=id,name,description&limit[sections]=2&filters[city]=name%20LIKE%20Scor%C8%9Beni
+```
+
 Model and corresponding tables must follow the official Laravel naming convention.
 ## ToDo:
 - tag versions
