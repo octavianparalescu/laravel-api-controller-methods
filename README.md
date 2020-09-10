@@ -16,7 +16,8 @@ Installing using composer:
 `composer require octavianparalescu/laravel-api-controller-methods`
 
 After creating the model, the controller and defining the controller as a resource-controller, load
-the traits into your controller and use the traits' methods:
+ the Request Converter as a dependency,
+load the traits into your controller and use the traits' methods:
 
 ```php
 <?php
