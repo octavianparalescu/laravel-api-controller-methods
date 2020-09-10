@@ -248,7 +248,7 @@ class RequestConverter
             foreach ($selectedFields as $selectedModel => $fields) {
                 $selectedModelClass = $this->getModelClass($mainResourceModel, $selectedModel);
                 if (class_exists($selectedModelClass)) {
-                    if (in_array(self::ALL_FIELDS_SELECTOR, $fields)) {
+                    if ($this->areAllFieldsSelectable($fields)) {
                         $selectedFields[$selectedModel] = $this->getSelectableFieldsOrGetAll(
                             $selectedModelClass . '::CAN_SELECT'
                         );
@@ -256,10 +256,13 @@ class RequestConverter
                         $selectedFields[$selectedModel] = array_filter(
                             $fields,
                             function ($item) use ($selectedModelClass, $selectedModel, &$request) {
-                                $isInArray = in_array(
-                                    $item,
-                                    $this->getSelectableFieldsOrGetAll($selectedModelClass . '::CAN_SELECT')
+                                $selectedModelSelectableFields = $this->getSelectableFieldsOrGetAll(
+                                    $selectedModelClass . '::CAN_SELECT'
                                 );
+                                $isInArray = in_array(
+                                        $item,
+                                        $selectedModelSelectableFields
+                                    ) || $this->areAllFieldsSelectable($selectedModelSelectableFields);
 
                                 if (!$isInArray) {
                                     $request['errors'][] = 'There is no field ' . $item . ' on resource ' . $selectedModel;
@@ -570,10 +573,20 @@ class RequestConverter
     /**
      * @param string $selectableConstantName
      *
-     * @return mixed|string[]
+     * @return string[]
      */
-    private function getSelectableFieldsOrGetAll(string $selectableConstantName)
+    private function getSelectableFieldsOrGetAll(string $selectableConstantName): array
     {
         return defined($selectableConstantName) ? constant($selectableConstantName) : [self::ALL_FIELDS_SELECTOR];
+    }
+
+    /**
+     * @param bool $fields
+     *
+     * @return bool
+     */
+    private function areAllFieldsSelectable(bool $fields): bool
+    {
+        return in_array(self::ALL_FIELDS_SELECTOR, $fields);
     }
 }
