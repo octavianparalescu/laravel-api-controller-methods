@@ -34,7 +34,7 @@ class RequestConverter
         $sortableByConstantName = $mainResourceModel . '::SORTABLE_BY';
         $sortableBy = defined($sortableByConstantName) ? constant($sortableByConstantName) : [];
         $selectableConstantName = $mainResourceModel . '::CAN_SELECT';
-        $selectable = defined($selectableConstantName) ? constant($selectableConstantName) : [];
+        $selectable = defined($selectableConstantName) ? constant($selectableConstantName) : [self::ALL_FIELDS_SELECTOR];
 
         /** @var Builder $query */
         $query = call_user_func([$mainResourceModel, 'query']);
