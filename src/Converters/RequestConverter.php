@@ -581,11 +581,11 @@ class RequestConverter
     }
 
     /**
-     * @param bool $fields
+     * @param array $fields
      *
      * @return bool
      */
-    private function areAllFieldsSelectable(bool $fields): bool
+    private function areAllFieldsSelectable(array $fields): bool
     {
         return in_array(self::ALL_FIELDS_SELECTOR, $fields);
     }
