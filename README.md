@@ -33,6 +33,8 @@ use OctavianParalescu\ApiController\Converters\RequestConverter;
 class CityController extends Controller
 {
     use ApiIndexTrait, ApiShowTrait;
+    const CAN_SELECT = ['id', 'name']; // Fields that can be selected
+    const OTHER_SINGLE_IDENTIFIER = 'name'; // If you have a different primary key than "id"
     /**
      * @var RequestConverter
      */

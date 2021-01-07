@@ -474,8 +474,7 @@ class RequestConverter
             $otherIdentifier = constant($mainResourceModel . '::OTHER_SINGLE_IDENTIFIER');
             $query->where(
                 function ($query) use ($id, $otherIdentifier) {
-                    $query->where('id', '=', $id)
-                          ->orWhere($otherIdentifier, '=', $id);
+                    $query->where($otherIdentifier, '=', $id);
                 }
             );
         } else {
