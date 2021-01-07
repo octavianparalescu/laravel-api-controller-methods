@@ -19,6 +19,7 @@ class RequestConverter
     const ALL_FIELDS_SELECTOR = '*';
     const CAN_SELECT = 'CAN_SELECT';
     const SORTABLE_BY = 'SORTABLE_BY';
+    const FILTERABLE_BY = 'FILTERABLE_BY';
 
     /**
      * Converts the HTTP Request parameters to a Model Query for the
@@ -104,12 +105,9 @@ class RequestConverter
             $selectable
         );
 
-        // Extracts filters
-        $request['filters'] = $this->extractFilters($httpRequest->query('filters'));
-
+        $request = $this->extractFilters($request, $mainResourceModel, $httpRequest->query('filters'));
         $request = $this->extractSelectedFieldsFromFilters($request);
         $request = $this->extractEagerLoadedResources($request, $mainResourceName, $mainResourceModel);
-
         $request = $this->extractLimitParameters($httpRequest->query('limit'), $request);
 
         return $request;
@@ -132,7 +130,8 @@ class RequestConverter
         string $mainResourceName,
         Builder $query,
         string $id = null
-    ): Builder {
+    ): Builder
+    {
         $query = $this->selectEagerLoadedResources($request['selected_fields'], $request['limits'], $mainResourceName, $query);
         $query = $this->selectMainResource($query, $request, $mainResourceName);
 
@@ -140,8 +139,8 @@ class RequestConverter
             $query = $this->applyShowSingleResource($id, $mainResourceModel, $query);
         } elseif ($apiAction === self::API_ACTION_INDEX) {
             $query = $this->applySortingMainResource($request['sorting'], $query);
-            $query = $this->applyFiltersAllResource($request['filters'], $mainResourceName, $mainResourceModel, $query);
         }
+        $query = $this->applyFiltersAllResource($request['filters'], $mainResourceName, $mainResourceModel, $query);
 
         return $query;
     }
@@ -290,16 +289,29 @@ class RequestConverter
     }
 
     /**
+     * @param array      $request
+     * @param string     $mainResourceModel
      * @param array|null $requestFilters
      *
      * @return array
      */
     private function extractFilters(
+        array $request,
+        string $mainResourceModel,
         ?array $requestFilters
     ): array {
         $extractedFilters = [];
         if (!empty($requestFilters)) {
             foreach ($requestFilters as $filteredResource => $filters) {
+                $selectedModelClass = $this->getModelClass($mainResourceModel, $filteredResource);
+                $filterableByConstantName = $selectedModelClass . '::' . self::FILTERABLE_BY;
+                $filterableBy = defined($filterableByConstantName) ? constant($filterableByConstantName) : [];
+
+                if (empty($filterableBy)) {
+                    $request['errors'][] = 'Resource ' . $filteredResource . ' is not filterable.';
+                    continue;
+                }
+
                 if (!is_array($filters)) {
                     $filters = [$filters];
                 }
@@ -311,19 +323,26 @@ class RequestConverter
                         if (!isset($extractedFilters[$filteredResource])) {
                             $extractedFilters[$filteredResource] = [];
                         }
+                        $filteredField = $matches[1];
+                        if (!in_array($filteredField, $filterableBy)) {
+                            $request['errors'][] = 'Field ' . $filteredField . ' is not filterable on resource ' . $filteredResource . ' is not filterable.';
+                            continue;
+                        }
                         if (count($matches) === 4) {
                             // eg. [id][=][3]
-                            $extractedFilters[$filteredResource][] = [$matches[1], $matches[2], $matches[3]];
+                            $extractedFilters[$filteredResource][] = [$filteredField, $matches[2], $matches[3]];
                         } elseif (count($matches) === 3) {
                             // eg. [id] [not null]
-                            $extractedFilters[$filteredResource][] = [$matches[1], $matches[2]];
+                            $extractedFilters[$filteredResource][] = [$filteredField, $matches[2]];
                         }
                     }
                 }
             }
         }
 
-        return $extractedFilters;
+        $request['filters'] = $extractedFilters;
+
+        return $request;
     }
 
     private function extractSelectedFieldsFromFilters(array $request): array
